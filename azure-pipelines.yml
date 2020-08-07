@@ -8,6 +8,14 @@ trigger:
     include:
     - apis/trips
 
+pr:
+  branches:
+    include:
+      - master
+  paths:
+    include:
+    - apis/trips
+
 pool:
   vmImage: 'ubuntu-latest'
 
