@@ -58,7 +58,7 @@ stages:
             dep ensure
         fi
         go build -v .
-      workingDirectory: '$(modulePath)'
+      workingDirectory: '$(modulePath)/apis/trips'
       displayName: 'Get dependencies, then build'
 
 - stage: Test
