@@ -39,6 +39,9 @@ stages:
         mv !(gopath) '$(modulePath)'
         echo '##vso[task.prependpath]$(GOBIN)'
         echo '##vso[task.prependpath]$(GOROOT)/bin'
+        echo $(GOBIN)
+        echo $(GOROOT)
+        go env
       displayName: 'Set up the Go workspace'
 
     - script: |
