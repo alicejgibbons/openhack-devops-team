@@ -41,7 +41,7 @@ stages:
         echo '##vso[task.prependpath]$(GOROOT)/bin'
         echo $(GOBIN)
         echo $(GOROOT)
-        go env
+        ls /usr/local/
       displayName: 'Set up the Go workspace'
 
     - script: |
