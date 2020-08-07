@@ -23,7 +23,7 @@ variables:
   GOBIN:  '$(GOPATH)/bin' # Go binaries path
   GOROOT: '/usr/local/go1.11' # Go installation path
   GOPATH: '$(system.defaultWorkingDirectory)/gopath' # Go workspace path
-  modulePath: '$(GOPATH)/src/github.com/$(build.repository.name)/apis/trips/main.go' # Path to the module's code
+  modulePath: '$(GOPATH)/src/github.com/$(build.repository.name)/apis/trips/' # Path to the module's code
 
 stages:
 - stage: Build 
@@ -47,7 +47,7 @@ stages:
         echo $(GOBIN)
         echo $(GOROOT)
         echo $(GOPATH)
-        ls $(GOPATH)/src/github.com/$(build.repository.name)/
+        ls $(GOPATH)/src/github.com/$(build.repository.name)/apis/trips/
       displayName: 'Set up the Go workspace'
 
     - script: |
