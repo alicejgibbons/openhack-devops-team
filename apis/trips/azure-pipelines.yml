@@ -30,6 +30,11 @@ stages:
   jobs:
   - job: BuildTrips
     steps:
+    - task: GoTool@0
+      inputs:
+        version: '1.11.3'
+        goPath: '$(system.defaultWorkingDirectory)/gopath'
+        goBin: '$(GOPATH)/bin'
     - script: |
         mkdir -p '$(GOBIN)'
         mkdir -p '$(GOPATH)/pkg'
@@ -41,7 +46,7 @@ stages:
         echo '##vso[task.prependpath]$(GOROOT)/bin'
         echo $(GOBIN)
         echo $(GOROOT)
-        ls /usr/local/
+        ls /usr/local/bin
       displayName: 'Set up the Go workspace'
 
     - script: |
