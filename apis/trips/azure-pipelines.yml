@@ -47,7 +47,7 @@ stages:
         echo $(GOBIN)
         echo $(GOROOT)
         echo $(GOPATH)
-        ls $(GOPATH)/src/github.com/$(build.repository.name)/apis/trips/
+        ls $(GOPATH)/src/github.com/$(build.repository.name)/
       displayName: 'Set up the Go workspace'
 
     - script: |
