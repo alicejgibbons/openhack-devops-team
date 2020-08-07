@@ -4,7 +4,9 @@
 # https://docs.microsoft.com/azure/devops/pipelines/languages/go
 
 trigger:
-- master
+  paths:
+    include:
+    - apis/trips
 
 pool:
   vmImage: 'ubuntu-latest'
@@ -13,7 +15,7 @@ variables:
   GOBIN:  '$(GOPATH)/bin' # Go binaries path
   GOROOT: '/usr/local/go1.11' # Go installation path
   GOPATH: '$(system.defaultWorkingDirectory)/gopath' # Go workspace path
-  modulePath: '$(GOPATH)/src/github.com/$(build.repository.name)' # Path to the module's code
+  modulePath: '$(GOPATH)/src/github.com/$(build.repository.name)/apis/trip' # Path to the module's code
 
 stages:
 - stage: Build 
@@ -41,3 +43,14 @@ stages:
         go build -v .
       workingDirectory: '$(modulePath)'
       displayName: 'Get dependencies, then build'
+
+- stage: Test
+  jobs:
+  - job: UnitTests
+    steps: 
+    - task: Go@0
+      inputs:
+        command: 'test'
+        arguments: '-v'
+        workingDirectory: '$(modulePath)'
+
