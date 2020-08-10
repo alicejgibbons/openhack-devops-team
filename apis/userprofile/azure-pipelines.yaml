@@ -4,7 +4,17 @@
 # https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
 
 trigger:
-- master
+  paths:
+    include:
+    - apis/userprofile
+
+pr:
+  branches:
+    include:
+      - master
+  paths:
+    include:
+    - apis/userprofile
 
 pool:
   vmImage: 'ubuntu-latest'
