@@ -30,11 +30,9 @@ steps:
 - task: DotNetCoreCLI@2
   inputs:
     command: 'build'
-    projects: 'web/poi.csproj'
-    workingDirectory: 'apis/poi/'
+    projects: 'apis/poi/web/poi.csproj'
 - task: DotNetCoreCLI@2
   inputs:
     command: 'test'
-    projects: 'tests/UnitTests'
+    projects: 'apis/poi/tests/UnitTests'
     testRunTitle: 'CI Unit Tests'
-    workingDirectory: 'apis/poi'
