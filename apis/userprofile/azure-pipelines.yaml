@@ -37,3 +37,12 @@ steps:
     workingDirectory: 'apis/userprofile'
     failOnStderr: true
   displayName: 'Run Tests'
+- task: CreateWorkItem@1
+  condition: failed()
+  inputs:
+    workItemType: 'Issue'
+    title: 'Build failed'
+    associate: true
+  displayName: 'Create work item'
+  
+  
