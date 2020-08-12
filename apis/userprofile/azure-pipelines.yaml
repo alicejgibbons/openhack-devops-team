@@ -1,48 +1,84 @@
 # Node.js
-# Build a general Node.js project with npm.
-# Add steps that analyze code, save build artifacts, deploy, and more:
-# https://docs.microsoft.com/azure/devops/pipelines/languages/javascript
+
+parameters:
+  - name: ForceDockerPush
+    displayName: Force Docker Push
+    type: boolean
+    default: false
+  - name: ForcePublishToStaging
+    displayName: Force Deployment in Staging Slot
+    type: boolean
+    default: false
 
 trigger:
-  paths:
-    include:
-    - apis/userprofile
+- master
 
 pr:
-  branches:
-    include:
-      - master
-  paths:
-    include:
-    - apis/userprofile
+- master
 
 pool:
   vmImage: 'ubuntu-latest'
 
-steps:
-- task: NodeTool@0
-  inputs:
-    versionSpec: '10.x'
-  displayName: 'Install Node.js'
-- task: Npm@1
-  inputs:
-    command: 'install'
-    workingDir: 'apis/userprofile'
-    verbose: true
-  displayName: 'Install Dependencies'
-- task: Bash@3
-  inputs:
-    targetType: 'inline'
-    script: 'npm run test'
-    workingDirectory: 'apis/userprofile'
-    failOnStderr: true
-  displayName: 'Run Tests'
-- task: CreateWorkItem@1
-  condition: failed()
-  inputs:
-    workItemType: 'Issue'
-    title: 'Build failed'
-    associate: true
-  displayName: 'Create work item'
-  
-  
+variables:
+- group: 'Key vault'
+- name: buildConfiguration
+  value: 'Release'
+- name: IsMaster
+  value: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+
+stages:
+  - stage: Build
+    jobs:
+    - job: BuildJob
+      steps:
+      - task: NodeTool@0
+        inputs:
+          versionSpec: '10.x'
+        displayName: 'Install Node.js'
+      - script: |
+          npm install
+          npm run build
+          npm run test
+        displayName: 'npm install/build/test'
+      - task: CreateWorkItem@1
+        condition: failed()
+        inputs:
+          workItemType: 'Bug'
+          title: 'PR build $(build.BuildNumber) failed'
+          areaPath: 'OpenHack-Team2\User'
+          linkPR: true
+
+  - stage: Docker
+    dependsOn: Build
+    condition: or(${{ variables.IsMaster }}, ${{ parameters.ForceDockerPush }})
+    jobs:
+    - job: DockerJob
+      steps:
+        - task: Docker@2
+          inputs:
+            containerRegistry: 'openhacktbr32g34'
+            repository: 'devopsoh/api-userprofile'
+            command: 'buildAndPush'
+            Dockerfile: '**/Dockerfile'
+            tags: '$(Build.BuildNumber)'
+
+  - stage: Deploy
+    dependsOn: Docker
+    condition: or(${{ variables.IsMaster }}, ${{parameters.ForcePublishToStaging}})
+    jobs:
+    - job: DeployJob
+      steps:
+      - task: AzureRmWebAppDeployment@4
+        inputs:
+          ConnectionType: 'AzureRM'
+          azureSubscription: 'OTA-PRD-135(70234334-e471-4987-8f08-e6079708a5e4)'
+          appType: 'webAppContainer'
+          WebAppName: 'openhacktbr32g34userprofile'
+          deployToSlotOrASE: true
+          ResourceGroupName: 'openhacktbr32g34rg'
+          SlotName: 'staging'
+          DockerNamespace: 'openhacktbr32g34acr.azurecr.io'
+          DockerRepository: 'devopsoh/api-userprofile'
+          DockerImageTag: '$(Build.BuildNumber)'
+          AppSettings: '-SQL_USER $(SQLUSER) -SQL_PASSWORD $(SQLPASSWORD) -SQL_SERVER $(SQLSERVER) -SQL_DBNAME $(SQLDBNAME)'
+

@@ -1,38 +1,185 @@
 # ASP.NET Core
-# Build and test ASP.NET Core projects targeting .NET Core.
-# Add steps that run tests, create a NuGet package, deploy, and more:
-# https://docs.microsoft.com/azure/devops/pipelines/languages/dotnet-core
+# DevOps pipeline up to challenge 5 including partially completed rollback challenges
+
+parameters:
+  - name: ForceDockerPush
+    displayName: Force Docker Push
+    type: boolean
+    default: false
+  - name: ForcePublishToStaging
+    displayName: Force Deployment in Staging Slot
+    type: boolean
+    default: false
 
 trigger:
-  paths:
-    include:
-    - apis/poi
+- master
 
 pr:
-  branches:
-    include:
-      - master
-  paths:
-    include:
-    - apis/poi
+- master
 
 pool:
   vmImage: 'ubuntu-latest'
 
 variables:
-  buildConfiguration: 'Release'
+- group: 'Key vault'
+- name: buildConfiguration
+  value: 'Release'
+- name: IsMaster
+  value: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+- name: StagingUri
+  value: 'https://openhacktbr32g34poi-staging.azurewebsites.net/api/healthcheck/poi'
+- name: ProdUri
+  value: 'https://openhacktbr32g34poi.azurewebsites.net/api/healthcheck/poi'
 
-steps:
-- task: UseDotNet@2
-  inputs:
-    packageType: 'sdk'
-    version: '2.x'
-- task: DotNetCoreCLI@2
-  inputs:
-    command: 'build'
-    projects: 'apis/poi/web/poi.csproj'
-- task: DotNetCoreCLI@2
-  inputs:
-    command: 'test'
-    projects: 'apis/poi/tests/UnitTests'
-    testRunTitle: 'CI Unit Tests'
+stages:
+  - stage: Build
+    jobs:
+    - job: BuildJob
+      steps:
+      - script: dotnet build --configuration $(buildConfiguration)
+        displayName: 'dotnet build $(buildConfiguration)'
+      - task: DotNetCoreCLI@2
+        inputs:
+          command: 'test'
+          projects: '**/*UnitTests.csproj'
+          testRunTitle: 'poiUnitTests'
+        displayName: PoiUnitTest
+      - task: CreateWorkItem@1
+        condition: failed()
+        inputs:
+          workItemType: 'Bug'
+          title: 'PR build $(build.BuildNumber) failed'
+          areaPath: 'OpenHack-Team2\POI-Team'
+          linkPR: true
+
+  - stage: Docker
+    dependsOn: Build
+    condition: or(${{ variables.IsMaster }}, ${{ parameters.ForceDockerPush }})
+    jobs:
+    - job: DockerJob
+      steps:
+        - task: Docker@2
+          inputs:
+            containerRegistry: 'openhacktbr32g34'
+            repository: 'devopsoh/api-poi'
+            command: 'buildAndPush'
+            Dockerfile: '**/Dockerfile'
+            tags: '$(Build.BuildNumber)'
+            
+  - stage: Deploy
+    dependsOn: Docker
+    condition: or(${{ variables.IsMaster }}, ${{parameters.ForcePublishToStaging}})
+    jobs:
+    - job: DeployJob
+      steps:
+      - task: AzureRmWebAppDeployment@4
+        inputs:
+          ConnectionType: 'AzureRM'
+          azureSubscription: 'OTA-PRD-135(70234334-e471-4987-8f08-e6079708a5e4)'
+          appType: 'webAppContainer'
+          WebAppName: 'openhacktbr32g34poi'
+          deployToSlotOrASE: true
+          ResourceGroupName: 'openhacktbr32g34rg'
+          SlotName: 'staging'
+          DockerNamespace: 'openhacktbr32g34acr.azurecr.io'
+          DockerRepository: 'devopsoh/api-poi'
+          DockerImageTag: '$(Build.BuildNumber)'
+          AppSettings: '-SQL_USER $(SQLUSER) -SQL_PASSWORD $(SQLPASSWORD) -SQL_SERVER $(SQLSERVER) -SQL_DBNAME $(SQLDBNAME)'
+      
+      - task: PowerShell@2
+        inputs:
+          targetType: 'inline'
+          script: |
+            $R = $null
+            while($R -eq $null -or ($R.StatusCode -lt 200 -or $R.StatusCode -ge 300)) {
+              $R = Invoke-WebRequest -URI $env:STAGINGURI
+              $timestamp = Get-Date
+              $output = '{0} | {1}' -f($timestamp, $R.StatusCode)
+              Write-Output $output
+              Start-Sleep -Seconds 1
+            }
+      - task: DotNetCoreCLI@2
+        inputs:
+          command: 'test'
+          projects: '**/*IntegrationTests.csproj'
+          testRunTitle: 'poiIntegrationTests'
+        displayName: PoiIntegrationTests
+      - task: CreateWorkItem@1
+        condition: failed()
+        inputs:
+          workItemType: 'Bug'
+          title: 'Deployement for build $(build.BuildNumber) failed'
+          areaPath: 'OpenHack-Team2\POI-Team'
+      - task: AzureCLI@2
+        inputs:
+          azureSubscription: 'OTA-PRD-135 (70234334-e471-4987-8f08-e6079708a5e4)'
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: 'az webapp traffic-routing set --distribution staging=10 --name openhacktbr32g34poi --resource-group openhacktbr32g34rg'
+  - stage: 'ApprovalRequired'
+    jobs:
+    - deployment: 'SwapDeployment'
+      displayName: Swap deployment
+      environment: 'ApprovalRequired'
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - task: AzureCLI@2
+              inputs:
+                azureSubscription: 'OTA-PRD-135 (70234334-e471-4987-8f08-e6079708a5e4)'
+                scriptType: 'bash'
+                scriptLocation: 'inlineScript'
+                inlineScript: 'az webapp traffic-routing set --distribution staging=50 --name openhacktbr32g34poi --resource-group openhacktbr32g34rg'
+            - task: AzureAppServiceManage@0
+              inputs:
+                azureSubscription: 'OTA-PRD-135 (70234334-e471-4987-8f08-e6079708a5e4)'
+                Action: 'Swap Slots'
+                WebAppName: 'openhacktbr32g34poi'
+                ResourceGroupName: 'openhacktbr32g34rg'
+                SourceSlot: 'staging'
+    - job: ValidateProductionEnv
+      steps:
+    
+      - task: oneluckidevWebSmokeTest@1
+        inputs:
+          url: '${{ variables.ProdUri }}'
+          expectedReturnCode: '200'
+          retryAttemptCount: '3'
+          strictSSL: true
+          retryDelay: '1000'
+
+    - job: CancelProductionDeployment
+      dependsOn: ValidateProductionEnv
+      condition: failed()
+      steps:
+      - task: AzureAppServiceManage@0
+        inputs:
+          azureSubscription: 'OTA-PRD-135 (70234334-e471-4987-8f08-e6079708a5e4)'
+          Action: 'Swap Slots'
+          WebAppName: 'openhacktbr32g34poi'
+          ResourceGroupName: 'openhacktbr32g34rg'
+          SourceSlot: 'staging'
+      - task: AzureCLI@2
+        inputs:
+          azureSubscription: 'OTA-PRD-135 (70234334-e471-4987-8f08-e6079708a5e4)'
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: 'az webapp traffic-routing set --distribution staging=0 --name openhacktbr32g34poi --resource-group openhacktbr32g34rg'          
+      - task: CreateWorkItem@1
+        inputs:
+          workItemType: 'Bug'
+          title: 'Invalid prod env $(build.BuildNumber)'
+          areaPath: 'OpenHack-Team2\POI-Team'
+          linkPR: true
+
+    - job: FinalizeProductionEnvironment
+      dependsOn: ValidateProductionEnv
+      condition: succeeded()
+      steps:
+      - task: AzureCLI@2
+        inputs:
+          azureSubscription: 'OTA-PRD-135 (70234334-e471-4987-8f08-e6079708a5e4)'
+          scriptType: 'bash'
+          scriptLocation: 'inlineScript'
+          inlineScript: 'az webapp traffic-routing set --distribution staging=0 --name openhacktbr32g34poi --resource-group openhacktbr32g34rg'

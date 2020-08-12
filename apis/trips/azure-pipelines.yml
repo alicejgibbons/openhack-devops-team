@@ -1,48 +1,96 @@
-# Go
-# Build your Go project.
-# Add steps that test, save build artifacts, deploy, and more:
-# https://docs.microsoft.com/azure/devops/pipelines/languages/go
+# ASP.NET Core
+
+parameters:
+  - name: ForceDockerPush
+    displayName: Force Docker Push
+    type: boolean
+    default: false
+  - name: ForcePublishToStaging
+    displayName: Force Deployment in Staging Slot
+    type: boolean
+    default: false
 
 trigger:
-  paths:
-    include:
-    - apis/trips
+- master
 
 pr:
-  branches:
-    include:
-      - master
-  paths:
-    include:
-    - apis/trips
+- master
 
 pool:
   vmImage: 'ubuntu-latest'
 
-stages:
-- stage: Build 
-  jobs:
-  - job: BuildTrips
-    steps:
-    - task: GoTool@0
-      inputs:
-        version: '1.13'
-    - task: Go@0
-      inputs:
-        command: 'get'
-        arguments: '-d'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/apis/trips'
-    - task: Go@0
-      inputs:
-        command: 'build'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/apis/trips'
-- stage: Test
-  jobs:
-  - job: UnitTests
-    steps: 
-    - task: Go@0
-      inputs:
-        command: 'test'
-        arguments: '-v'
-        workingDirectory: '$(System.DefaultWorkingDirectory)/apis/trips/tests'
+variables:
+- group: 'Key vault'
+- name: buildConfiguration
+  value: 'Release'
+- name: IsMaster
+  value: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
 
+stages:
+  - stage: Build
+    jobs:
+    - job: BuildJob
+      steps:
+      - task: GoTool@0
+        inputs:
+          version: '1.13.5'
+      - task: Go@0
+        inputs:
+          command: 'build'
+      - task: Go@0
+        inputs:
+          command: 'test'
+          workingDirectory: '$(System.DefaultWorkingDirectory)/tests'
+      - task: CreateWorkItem@1
+        condition: failed()
+        inputs:
+          workItemType: 'Bug'
+          title: 'PR build $(build.BuildNumber) failed'
+          areaPath: 'OpenHack-Team2\Trip-Team'
+          linkPR: true
+
+  - stage: Docker
+    dependsOn: Build
+    condition: or(${{ variables.IsMaster }}, ${{ parameters.ForceDockerPush }})
+    jobs:
+    - job: DockerJob
+      steps:
+        - task: Docker@2
+          inputs:
+            containerRegistry: 'openhacktbr32g34'
+            repository: 'devopsoh/api-trips'
+            command: 'buildAndPush'
+            Dockerfile: '**/Dockerfile'
+            tags: '$(Build.BuildNumber)'
+            
+  - stage: Deploy
+    dependsOn: Docker
+    condition: or(${{ variables.IsMaster }}, ${{parameters.ForcePublishToStaging}})
+    jobs:
+    - job: DeployJob
+      steps:
+      - task: AzureRmWebAppDeployment@4
+        inputs:
+          ConnectionType: 'AzureRM'
+          azureSubscription: 'OTA-PRD-135(70234334-e471-4987-8f08-e6079708a5e4)'
+          appType: 'webAppContainer'
+          WebAppName: 'openhacktbr32g34trips'
+          deployToSlotOrASE: true
+          ResourceGroupName: 'openhacktbr32g34rg'
+          SlotName: 'staging'
+          DockerNamespace: 'openhacktbr32g34acr.azurecr.io'
+          DockerRepository: 'devopsoh/api-trips'
+          DockerImageTag: '$(Build.BuildNumber)'
+          AppSettings: '-SQL_USER $(SQLUSER) -SQL_PASSWORD $(SQLPASSWORD) -SQL_SERVER $(SQLSERVER) -SQL_DBNAME $(SQLDBNAME)'  
+          
+      # - task: Go@0
+      #   inputs:
+      #     command: 'test'
+      #     workingDirectory: '$(System.DefaultWorkingDirectory)/tripsgo'
+      # - task: CreateWorkItem@1
+      #   condition: failed()
+      #   inputs:
+      #     workItemType: 'Bug'
+      #     title: 'Deployement for build $(build.BuildNumber) failed'
+      #     areaPath: 'OpenHack-Team2\POI-Team'
+         

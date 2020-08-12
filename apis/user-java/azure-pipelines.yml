@@ -1,32 +1,88 @@
-# Maven
-# Build your Java project and run tests with Apache Maven.
-# Add steps that analyze code, save build artifacts, deploy, and more:
-# https://docs.microsoft.com/azure/devops/pipelines/languages/java
+parameters:
+  - name: ForceDockerPush
+    displayName: Force Docker Push
+    type: boolean
+    default: false
+  - name: ForcePublishToStaging
+    displayName: Force Deployment in Staging Slot
+    type: boolean
+    default: false
 
 trigger:
-  paths:
-    include:
-    - apis/user-java
+- master
 
 pr:
-  branches:
-    include:
-      - master
-  paths:
-    include:
-    - apis/user-java
+- master
 
 pool:
   vmImage: 'ubuntu-latest'
 
-steps:
-- task: Maven@3
-  inputs:
-    mavenPomFile: 'apis/user-java/pom.xml'
-    mavenOptions: '-Xmx3072m'
-    javaHomeOption: 'JDKVersion'
-    jdkVersionOption: '1.8'
-    jdkArchitectureOption: 'x64'
-    publishJUnitResults: true
-    testResultsFiles: '**/surefire-reports/TEST-*.xml'
-    goals: 'package'
+variables:
+  - group: 'Key vault'
+  - name: buildConfiguration
+    value: 'Release'
+  - name: IsMaster
+    value: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/master'))
+
+stages:
+  - stage: Build
+    jobs:
+    - job: BuildJob
+      steps:
+      - task: Maven@3
+        inputs:
+          mavenPomFile: 'pom.xml'
+          mavenOptions: '-Xmx3072m'
+          javaHomeOption: 'JDKVersion'
+          jdkVersionOption: '1.8'
+          jdkArchitectureOption: 'x64'
+          publishJUnitResults: true
+          testResultsFiles: '**/surefire-reports/TEST-*.xml'
+          goals: 'package'
+      - task: CreateWorkItem@1
+        condition: failed()
+        inputs:
+          workItemType: 'Bug'
+          title: 'PR build $(build.BuildNumber) failed'
+          areaPath: 'OpenHack-Team2\User-Java-Teams'
+          linkPR: true 
+
+  - stage: Docker
+    dependsOn: Build
+    condition: or(${{ variables.IsMaster }}, ${{ parameters.ForceDockerPush }})
+    jobs:
+    - job: DockerJob
+      steps:
+        - task: Docker@2
+          inputs:
+            containerRegistry: 'openhacktbr32g34'
+            repository: 'devopsoh/api-user-java'
+            command: 'buildAndPush'
+            Dockerfile: '**/Dockerfile'
+            tags: '$(Build.BuildNumber)'
+
+  - stage: Deploy
+    dependsOn: Docker
+    condition: or(${{ variables.IsMaster }}, ${{parameters.ForcePublishToStaging}})
+    jobs:
+    - job: DeployJob
+      steps:
+      - task: AzureRmWebAppDeployment@4
+        inputs:
+          ConnectionType: 'AzureRM'
+          azureSubscription: 'OTA-PRD-135(70234334-e471-4987-8f08-e6079708a5e4)'
+          appType: 'webAppContainer'
+          WebAppName: 'openhacktbr32g34userjava'
+          deployToSlotOrASE: true
+          ResourceGroupName: 'openhacktbr32g34rg'
+          SlotName: 'staging'
+          DockerNamespace: 'openhacktbr32g34acr.azurecr.io'
+          DockerRepository: 'devopsoh/api-user-java'
+          DockerImageTag: '$(Build.BuildNumber)'
+          AppSettings: '-SQL_USER $(SQLUSER) -SQL_PASSWORD $(SQLPASSWORD) -SQL_SERVER $(SQLSERVER) -SQL_DBNAME $(SQLDBNAME)'
+      - task: CreateWorkItem@1
+        condition: failed()
+        inputs:
+          workItemType: 'Bug'
+          title: 'Deployement for build $(build.BuildNumber) failed'
+          areaPath: 'OpenHack-Team2\User-Java-Teams'
